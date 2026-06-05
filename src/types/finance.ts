@@ -30,17 +30,30 @@ export interface MonthlyData {
   cumulativeSavings: number;
 }
 
+export interface ChecklistItemConfig {
+  subcategoryId: string;
+  categoryId: string;
+  enabled: boolean;
+  defaultDueDay: number; // day of month (1-31)
+}
+
 export interface ChecklistItem {
   subcategoryId: string;
   categoryId: string;
   name: string;
   categoryName: string;
   completed: boolean;
+  dueDay: number; // day of month, can be overridden per month
 }
 
 export interface MonthlyChecklist {
   month: string;
   items: ChecklistItem[];
+}
+
+export interface ChecklistSettings {
+  enabledCategories: string[]; // kept for backward compat
+  itemConfigs: ChecklistItemConfig[];
 }
 
 export interface AppData {
@@ -51,9 +64,7 @@ export interface AppData {
   settings: {
     pin: string;
     currency: string;
-    checklistSettings?: {
-      enabledCategories: string[];
-    };
+    checklistSettings?: ChecklistSettings;
   };
 }
 

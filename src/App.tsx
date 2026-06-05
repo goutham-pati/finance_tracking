@@ -35,6 +35,7 @@ function App() {
     deleteMonth,
     updateSettings,
     toggleChecklistItem,
+    updateChecklistDueDay,
     deleteProfile,
   } = useProfileData();
 
@@ -80,6 +81,7 @@ function App() {
             selectedMonth={selectedMonth}
             onMonthChange={setSelectedMonth}
             onChecklistToggle={toggleChecklistItem}
+            onChecklistDueDayChange={updateChecklistDueDay}
             currency={data.settings.currency}
             checklistSettings={data.settings.checklistSettings}
           />

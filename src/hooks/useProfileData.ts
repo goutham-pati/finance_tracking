@@ -250,36 +250,53 @@ export const useProfileData = () => {
     });
   };
 
+  const getEnabledChecklistItems = (data: AppData) => {
+    const itemConfigs = data.settings.checklistSettings?.itemConfigs || [];
+    const enabledConfigs = itemConfigs.filter((c) => c.enabled);
+
+    // Backward compat: if no itemConfigs, use enabledCategories
+    if (enabledConfigs.length === 0) {
+      const enabledCategories = data.settings.checklistSettings?.enabledCategories || [];
+      const cats = enabledCategories.length > 0
+        ? data.categories.filter((c) => enabledCategories.includes(c.id))
+        : data.categories.filter((c) =>
+            (c.name.toLowerCase().includes('loan') && c.name.toLowerCase().includes('emi')) ||
+            c.name.toLowerCase().includes('compulsory')
+          );
+      return cats.flatMap((cat) =>
+        cat.subcategories.map((sub) => ({ subcategoryId: sub.id, categoryId: cat.id, defaultDueDay: 1 }))
+      );
+    }
+    return enabledConfigs;
+  };
+
+  const buildChecklistItem = (data: AppData, subcategoryId: string, completed: boolean, dueDay?: number): ChecklistItem | null => {
+    const cat = data.categories.find((c) => c.subcategories.some((sc) => sc.id === subcategoryId));
+    const sub = cat?.subcategories.find((sc) => sc.id === subcategoryId);
+    if (!cat || !sub) return null;
+    const config = data.settings.checklistSettings?.itemConfigs?.find((c) => c.subcategoryId === subcategoryId);
+    return {
+      subcategoryId: sub.id,
+      categoryId: cat.id,
+      name: sub.name,
+      categoryName: cat.name,
+      completed,
+      dueDay: dueDay ?? config?.defaultDueDay ?? 1,
+    };
+  };
+
   const toggleChecklistItem = async (month: string, subcategoryId: string) => {
     const profile = getCurrentProfile();
     if (!profile) return;
 
     const checklists = [...profile.data.monthlyChecklists];
     const idx = checklists.findIndex((cl) => cl.month === month);
-
-    const enabledCategories = profile.data.settings.checklistSettings?.enabledCategories || [];
-    const categoriesToInclude =
-      enabledCategories.length > 0
-        ? profile.data.categories.filter((c) => enabledCategories.includes(c.id))
-        : profile.data.categories.filter(
-            (c) =>
-              (c.name.toLowerCase().includes('loan') && c.name.toLowerCase().includes('emi')) ||
-              c.name.toLowerCase().includes('compulsory')
-          );
+    const enabledItems = getEnabledChecklistItems(profile.data);
 
     if (idx === -1) {
-      const items: ChecklistItem[] = [];
-      categoriesToInclude.forEach((cat) => {
-        cat.subcategories.forEach((sub) => {
-          items.push({
-            subcategoryId: sub.id,
-            categoryId: cat.id,
-            name: sub.name,
-            categoryName: cat.name,
-            completed: sub.id === subcategoryId,
-          });
-        });
-      });
+      const items: ChecklistItem[] = enabledItems
+        .map((ei) => buildChecklistItem(profile.data, ei.subcategoryId, ei.subcategoryId === subcategoryId, ei.defaultDueDay))
+        .filter((i): i is ChecklistItem => i !== null);
       checklists.push({ month, items });
     } else {
       const existing = checklists[idx];
@@ -293,18 +310,38 @@ export const useProfileData = () => {
           ),
         };
       } else {
-        const cat = profile.data.categories.find((c) => c.subcategories.some((sc) => sc.id === subcategoryId));
-        const sub = cat?.subcategories.find((sc) => sc.id === subcategoryId);
-        if (cat && sub) {
-          checklists[idx] = {
-            ...existing,
-            items: [
-              ...existing.items,
-              { subcategoryId: sub.id, categoryId: cat.id, name: sub.name, categoryName: cat.name, completed: true },
-            ],
-          };
+        const newItem = buildChecklistItem(profile.data, subcategoryId, true);
+        if (newItem) {
+          checklists[idx] = { ...existing, items: [...existing.items, newItem] };
         }
       }
+    }
+
+    await updateProfileData(profile.id, { ...profile.data, monthlyChecklists: checklists });
+  };
+
+  const updateChecklistDueDay = async (month: string, subcategoryId: string, dueDay: number) => {
+    const profile = getCurrentProfile();
+    if (!profile) return;
+
+    const checklists = [...profile.data.monthlyChecklists];
+    const idx = checklists.findIndex((cl) => cl.month === month);
+
+    if (idx === -1) {
+      // Create the checklist for this month with the updated due day
+      const enabledItems = getEnabledChecklistItems(profile.data);
+      const items: ChecklistItem[] = enabledItems
+        .map((ei) => buildChecklistItem(profile.data, ei.subcategoryId, false,
+          ei.subcategoryId === subcategoryId ? dueDay : ei.defaultDueDay))
+        .filter((i): i is ChecklistItem => i !== null);
+      checklists.push({ month, items });
+    } else {
+      checklists[idx] = {
+        ...checklists[idx],
+        items: checklists[idx].items.map((i) =>
+          i.subcategoryId === subcategoryId ? { ...i, dueDay } : i
+        ),
+      };
     }
 
     await updateProfileData(profile.id, { ...profile.data, monthlyChecklists: checklists });
@@ -316,37 +353,17 @@ export const useProfileData = () => {
     month: string,
     subcategoryId: string
   ) => {
-    const enabledCategories = currentData.settings.checklistSettings?.enabledCategories || [];
-    const categoriesToInclude =
-      enabledCategories.length > 0
-        ? currentData.categories.filter((c) => enabledCategories.includes(c.id))
-        : currentData.categories.filter(
-            (c) =>
-              (c.name.toLowerCase().includes('loan') && c.name.toLowerCase().includes('emi')) ||
-              c.name.toLowerCase().includes('compulsory')
-          );
-
-    const isInChecklist = categoriesToInclude.some((cat) =>
-      cat.subcategories.some((sc) => sc.id === subcategoryId)
-    );
+    const enabledItems = getEnabledChecklistItems(currentData);
+    const isInChecklist = enabledItems.some((ei) => ei.subcategoryId === subcategoryId);
     if (!isInChecklist) return;
 
     const checklists = [...currentData.monthlyChecklists];
     const idx = checklists.findIndex((cl) => cl.month === month);
 
     if (idx === -1) {
-      const items: ChecklistItem[] = [];
-      categoriesToInclude.forEach((cat) => {
-        cat.subcategories.forEach((sub) => {
-          items.push({
-            subcategoryId: sub.id,
-            categoryId: cat.id,
-            name: sub.name,
-            categoryName: cat.name,
-            completed: sub.id === subcategoryId,
-          });
-        });
-      });
+      const items: ChecklistItem[] = enabledItems
+        .map((ei) => buildChecklistItem(currentData, ei.subcategoryId, ei.subcategoryId === subcategoryId, ei.defaultDueDay))
+        .filter((i): i is ChecklistItem => i !== null);
       checklists.push({ month, items });
     } else {
       const existing = checklists[idx];
@@ -358,6 +375,11 @@ export const useProfileData = () => {
             i.subcategoryId === subcategoryId ? { ...i, completed: true } : i
           ),
         };
+      } else {
+        const newItem = buildChecklistItem(currentData, subcategoryId, true);
+        if (newItem) {
+          checklists[idx] = { ...existing, items: [...existing.items, newItem] };
+        }
       }
     }
 
@@ -408,6 +430,7 @@ export const useProfileData = () => {
     deleteMonth,
     updateSettings,
     toggleChecklistItem,
+    updateChecklistDueDay,
     deleteProfile,
     refreshProfile,
   };
